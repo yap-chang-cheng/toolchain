@@ -1,0 +1,408 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Toolchain Maintainer <maintainer@example.com>
+Date: Fri, 28 Aug 2026 14:26:00 +0800
+Subject: [PATCH] binutils 2.38: customize x86 opcode mappings for i586-unknown-elf
+
+This patch customizes x86 opcode mappings for the i586-unknown-elf target:
+- bfd: update lazy PLT entry to use JUMP_PC_RELATIVE32
+- gas: update jump disp8 opcode mapping
+- gold: update PLT entry jump opcode
+- include/opcode/i386.h: define JUMP_PC_RELATIVE and JUMP_PC_RELATIVE32
+- opcodes: update disassembler tables and optab for sub, or, adc, jmp, wrmsr, rdtsc, rdmsr
+
+---
+diff --git a/bfd/elf32-i386.c b/bfd/elf32-i386.c
+index 25977cc..39c363f 100644
+--- a/bfd/elf32-i386.c
++++ b/bfd/elf32-i386.c
+@@ -556,7 +556,7 @@ static const bfd_byte elf_i386_lazy_plt_entry[LAZY_PLT_ENTRY_SIZE] =
+   0, 0, 0, 0,	/* replaced with address of this symbol in .got.  */
+   0x68,		/* pushl immediate */
+   0, 0, 0, 0,	/* replaced with offset into relocation table.  */
+-  0xe9,		/* jmp relative */
++  JUMP_PC_RELATIVE32,		/* jmp relative */
+   0, 0, 0, 0	/* replaced with offset to start of .plt.  */
+ };
+ 
+@@ -579,7 +579,7 @@ static const bfd_byte elf_i386_pic_lazy_plt_entry[LAZY_PLT_ENTRY_SIZE] =
+   0, 0, 0, 0,	/* replaced with offset of this symbol in .got.  */
+   0x68,		/* pushl immediate */
+   0, 0, 0, 0,	/* replaced with offset into relocation table.  */
+-  0xe9,		/* jmp relative */
++  JUMP_PC_RELATIVE32,		/* jmp relative */
+   0, 0, 0, 0	/* replaced with offset to start of .plt.  */
+ };
+ 
+@@ -620,7 +620,7 @@ static const bfd_byte elf_i386_lazy_ibt_plt_entry[LAZY_PLT_ENTRY_SIZE] =
+ {
+   0xf3, 0x0f, 0x1e, 0xfb,	/* endbr32		      */
+   0x68, 0, 0, 0, 0,		/* pushl immediate	      */
+-  0xe9, 0, 0, 0, 0,		/* jmp relative		      */
++  JUMP_PC_RELATIVE32, 0, 0, 0, 0,		/* jmp relative		      */
+   0x66, 0x90			/* xchg %ax,%ax		      */
+ };
+ 
+@@ -1350,7 +1350,7 @@ elf_i386_convert_load_reloc (bfd *abfd, Elf_Internal_Shdr *symtab_hdr,
+ 	  else
+ 	    {
+ 	      /* Convert to "jmp foo nop".  */
+-	      modrm = 0xe9;
++	      modrm = JUMP_PC_RELATIVE32;
+ 	      nop = NOP_OPCODE;
+ 	      nop_offset = roff + 3;
+ 	      irel->r_offset -= 1;
+diff --git a/gas/config/tc-i386.c b/gas/config/tc-i386.c
+index e063268..50d8f27 100644
+--- a/gas/config/tc-i386.c
++++ b/gas/config/tc-i386.c
+@@ -1422,11 +1422,11 @@ static const unsigned char f16_3[] =
+ static const unsigned char f16_4[] =
+   {0x8d,0xb4,0x00,0x00};		/* lea 0W(%si),%si	*/
+ static const unsigned char jump_disp8[] =
+-  {0xeb};				/* jmp disp8	       */
++  {JUMP_PC_RELATIVE};				/* jmp disp8	       */
+ static const unsigned char jump32_disp32[] =
+-  {0xe9};				/* jmp disp32	       */
++  {JUMP_PC_RELATIVE32};				/* jmp disp32	       */
+ static const unsigned char jump16_disp32[] =
+-  {0x66,0xe9};				/* jmp disp32	       */
++  {0x66,JUMP_PC_RELATIVE32};				/* jmp disp32	       */
+ /* 32-bit NOPs patterns.  */
+ static const unsigned char *const f32_patt[] = {
+   f32_1, f32_2, f32_3, f32_4, NULL, f32_6, f32_7
+@@ -12314,7 +12314,7 @@ md_estimate_size_before_relax (fragS *fragP, segT segment)
+ 	{
+ 	case UNCOND_JUMP:
+ 	  /* Make jmp (0xeb) a (d)word displacement jump.  */
+-	  opcode[0] = 0xe9;
++	  opcode[0] = JUMP_PC_RELATIVE32;
+ 	  fragP->fr_fix += size;
+ 	  fixP = fix_new (fragP, old_fr_fix, size,
+ 			  fragP->fr_symbol,
+@@ -12331,7 +12331,7 @@ md_estimate_size_before_relax (fragS *fragP, segT segment)
+ 	      opcode[0] ^= 1;
+ 	      opcode[1] = 3;
+ 	      /* Insert an unconditional jump.  */
+-	      opcode[2] = 0xe9;
++	      opcode[2] = JUMP_PC_RELATIVE32;
+ 	      /* We added two extra opcode bytes, and have a two byte
+ 		 offset.  */
+ 	      fragP->fr_fix += 2 + 2;
+@@ -12539,13 +12539,13 @@ md_convert_frag (bfd *abfd ATTRIBUTE_UNUSED, segT sec ATTRIBUTE_UNUSED,
+ 	{
+ 	case ENCODE_RELAX_STATE (UNCOND_JUMP, BIG):
+ 	  extension = 4;		/* 1 opcode + 4 displacement  */
+-	  opcode[0] = 0xe9;
++	  opcode[0] = JUMP_PC_RELATIVE32;
+ 	  where_to_put_displacement = &opcode[1];
+ 	  break;
+ 
+ 	case ENCODE_RELAX_STATE (UNCOND_JUMP, BIG16):
+ 	  extension = 2;		/* 1 opcode + 2 displacement  */
+-	  opcode[0] = 0xe9;
++	  opcode[0] = JUMP_PC_RELATIVE32;
+ 	  where_to_put_displacement = &opcode[1];
+ 	  break;
+ 
+@@ -12568,7 +12568,7 @@ md_convert_frag (bfd *abfd ATTRIBUTE_UNUSED, segT sec ATTRIBUTE_UNUSED,
+ 	  extension = 4;
+ 	  opcode[0] ^= 1;
+ 	  opcode[1] = 3;
+-	  opcode[2] = 0xe9;
++	  opcode[2] = JUMP_PC_RELATIVE32;
+ 	  where_to_put_displacement = &opcode[3];
+ 	  break;
+ 
+diff --git a/gold/i386.cc b/gold/i386.cc
+index c04bea8..0b7ed9a 100644
+--- a/gold/i386.cc
++++ b/gold/i386.cc
+@@ -1301,7 +1301,7 @@ const unsigned char Output_data_plt_i386_exec::plt_entry[plt_entry_size] =
+   0, 0, 0, 0,	// replaced with address of symbol in .got
+   0x68,		// pushl immediate
+   0, 0, 0, 0,	// replaced with offset into relocation table
+-  0xe9,		// jmp relative
++  JUMP_PC_RELATIVE32,		// jmp relative
+   0, 0, 0, 0	// replaced with offset to start of .plt
+ };
+ 
+@@ -1329,7 +1329,7 @@ const unsigned char Output_data_plt_i386_dyn::plt_entry[plt_entry_size] =
+   0, 0, 0, 0,	// replaced with offset of symbol in .got
+   0x68,		// pushl immediate
+   0, 0, 0, 0,	// replaced with offset into relocation table
+-  0xe9,		// jmp relative
++  JUMP_PC_RELATIVE32,		// jmp relative
+   0, 0, 0, 0	// replaced with offset to start of .plt
+ };
+ 
+@@ -3894,7 +3894,7 @@ Target_i386::do_code_fill(section_size_type length) const
+     {
+       // Build a jmp instruction to skip over the bytes.
+       unsigned char jmp[5];
+-      jmp[0] = 0xe9;
++      jmp[0] = JUMP_PC_RELATIVE32;
+       elfcpp::Swap_unaligned<32, false>::writeval(jmp + 1, length - 5);
+       return (std::string(reinterpret_cast<char*>(&jmp[0]), 5)
+ 	      + std::string(length - 5, static_cast<char>(0x90)));
+@@ -4284,7 +4284,7 @@ Output_data_plt_i386_nacl_exec::plt_entry[plt_entry_size] =
+   // Lazy GOT entries point here (32-byte aligned).
+   0x68,                       // pushl immediate
+   0, 0, 0, 0,                 // replaced with offset into relocation table
+-  0xe9,                       // jmp relative
++  JUMP_PC_RELATIVE32,                       // jmp relative
+   0, 0, 0, 0,                 // replaced with offset to start of .plt
+ 
+   // Pad to the next 32-byte boundary with nop instructions.
+@@ -4327,7 +4327,7 @@ Output_data_plt_i386_nacl_dyn::plt_entry[plt_entry_size] =
+   // Lazy GOT entries point here (32-byte aligned).
+   0x68,                // pushl immediate
+   0, 0, 0, 0,          // replaced with offset into relocation table.
+-  0xe9,                // jmp relative
++  JUMP_PC_RELATIVE32,                // jmp relative
+   0, 0, 0, 0,          // replaced with offset to start of .plt.
+ 
+   // Pad to the next 32-byte boundary with nop instructions.
+diff --git a/include/opcode/i386.h b/include/opcode/i386.h
+index e34a98a..579acc2 100644
+--- a/include/opcode/i386.h
++++ b/include/opcode/i386.h
+@@ -47,7 +47,8 @@
+ #define MOV_AX_DISP32 0xa0
+ #define POP_SEG_SHORT 0x07
+ #define POP_SEG386_SHORT 0xfa1
+-#define JUMP_PC_RELATIVE 0xeb
++#define JUMP_PC_RELATIVE 0xcb
++#define JUMP_PC_RELATIVE32 0xca
+ #define INT_OPCODE  0xcd
+ #define INT3_OPCODE 0xcc
+ /* The opcode for the fwait instruction, which disassembler treats as a
+diff --git a/opcodes/i386-dis.c b/opcodes/i386-dis.c
+index 862bd80..00c48f1 100644
+--- a/opcodes/i386-dis.c
++++ b/opcodes/i386-dis.c
+@@ -1780,21 +1780,39 @@ static const struct dis386 dis386[] = {
+   { X86_64_TABLE (X86_64_06) },
+   { X86_64_TABLE (X86_64_07) },
+   /* 08 */
++#if 0
+   { "orB",		{ Ebh1, Gb }, 0 },
+   { "orS",		{ Evh1, Gv }, 0 },
+   { "orB",		{ Gb, EbS }, 0 },
+   { "orS",		{ Gv, EvS }, 0 },
+   { "orB",		{ AL, Ib }, 0 },
+   { "orS",		{ eAX, Iv }, 0 },
++#else
++  { "adcB",		{ Ebh1, Gb }, 0 },
++  { "adcS",		{ Evh1, Gv }, 0 },
++  { "adcB",		{ Gb, EbS }, 0 },
++  { "adcS",		{ Gv, EvS }, 0 },
++  { "adcB",		{ AL, Ib }, 0 },
++  { "adcS",		{ eAX, Iv }, 0 },
++#endif
+   { X86_64_TABLE (X86_64_0E) },
+   { Bad_Opcode },	/* 0x0f extended opcode escape */
+   /* 10 */
++#if 0
+   { "adcB",		{ Ebh1, Gb }, 0 },
+   { "adcS",		{ Evh1, Gv }, 0 },
+   { "adcB",		{ Gb, EbS }, 0 },
+   { "adcS",		{ Gv, EvS }, 0 },
+   { "adcB",		{ AL, Ib }, 0 },
+   { "adcS",		{ eAX, Iv }, 0 },
++#else
++  { "subB",		{ Ebh1, Gb }, 0 },
++  { "subS",		{ Evh1, Gv }, 0 },
++  { "subB",		{ Gb, EbS }, 0 },
++  { "subS",		{ Gv, EvS }, 0 },
++  { "subB",		{ AL, Ib }, 0 },
++  { "subS",		{ eAX, Iv }, 0 },
++#endif
+   { X86_64_TABLE (X86_64_16) },
+   { X86_64_TABLE (X86_64_17) },
+   /* 18 */
+@@ -1816,12 +1834,21 @@ static const struct dis386 dis386[] = {
+   { Bad_Opcode },	/* SEG ES prefix */
+   { X86_64_TABLE (X86_64_27) },
+   /* 28 */
++#if 0
+   { "subB",		{ Ebh1, Gb }, 0 },
+   { "subS",		{ Evh1, Gv }, 0 },
+   { "subB",		{ Gb, EbS }, 0 },
+   { "subS",		{ Gv, EvS }, 0 },
+   { "subB",		{ AL, Ib }, 0 },
+   { "subS",		{ eAX, Iv }, 0 },
++#else
++  { "orB",		{ Ebh1, Gb }, 0 },
++  { "orS",		{ Evh1, Gv }, 0 },
++  { "orB",		{ Gb, EbS }, 0 },
++  { "orS",		{ Gv, EvS }, 0 },
++  { "orB",		{ AL, Ib }, 0 },
++  { "orS",		{ eAX, Iv }, 0 },
++#endif
+   { Bad_Opcode },	/* SEG CS prefix */
+   { X86_64_TABLE (X86_64_2F) },
+   /* 30 */
+@@ -1998,8 +2025,16 @@ static const struct dis386 dis386[] = {
+   /* c8 */
+   { "enterP",		{ Iw, Ib }, 0 },
+   { "leaveP",		{ XX }, 0 },
++#if 0
+   { "{l|}ret{|f}%LP",	{ Iw }, 0 },
++#else
++  { X86_64_TABLE (X86_64_E9) },
++#endif
++#if 0
+   { "{l|}ret{|f}%LP",	{ XX }, 0 },
++#else
++  { "jmp",		{ Jb, BND }, 0 },
++#endif
+   { "int3",		{ XX }, 0 },
+   { "int",		{ Ib }, 0 },
+   { X86_64_TABLE (X86_64_CE) },
+@@ -2033,9 +2068,17 @@ static const struct dis386 dis386[] = {
+   { "outG",		{ Ib, zAX }, 0 },
+   /* e8 */
+   { X86_64_TABLE (X86_64_E8) },
++#if 0
+   { X86_64_TABLE (X86_64_E9) },
++#else
++  { Bad_Opcode },
++#endif
+   { X86_64_TABLE (X86_64_EA) },
++#if 0
+   { "jmp",		{ Jb, BND }, 0 },
++#else
++  { Bad_Opcode },
++#endif
+   { "inB",		{ AL, indirDX }, 0 },
+   { "inG",		{ zAX, indirDX }, 0 },
+   { "outB",		{ indirDX, AL }, 0 },
+@@ -2116,13 +2159,25 @@ static const struct dis386 dis386_twobyte[] = {
+   { PREFIX_TABLE (PREFIX_0F2E) },
+   { PREFIX_TABLE (PREFIX_0F2F) },
+   /* 30 */
++#if 0
+   { "wrmsr",		{ XX }, 0 },
+   { "rdtsc",		{ XX }, 0 },
+   { "rdmsr",		{ XX }, 0 },
++#else
++  { Bad_Opcode },
++  { Bad_Opcode },
++  { Bad_Opcode },
++#endif
+   { "rdpmc",		{ XX }, 0 },
++#if 0
+   { "sysenter",		{ SEP }, 0 },
+   { "sysexit%LQ",	{ SEP }, 0 },
+   { Bad_Opcode },
++#else
++  { "wrmsr",		{ XX }, 0 },
++  { "rdtsc",		{ XX }, 0 },
++  { "rdmsr",		{ XX }, 0 },
++#endif
+   { "getsec",		{ XX }, 0 },
+   /* 38 */
+   { THREE_BYTE_TABLE_PREFIX (THREE_BYTE_0F38, PREFIX_OPCODE) },
+diff --git a/opcodes/i386-tbl.h b/opcodes/i386-tbl.h
+index c240b43..0e05bc2 100644
+--- a/opcodes/i386-tbl.h
++++ b/opcodes/i386-tbl.h
+@@ -1521,7 +1521,7 @@ const insn_template i386_optab[] =
+         0, 0, 0, 0, 0, 0, 0 } },
+     { { { 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1,
+ 	  0, 0, 0, 0, 0, 1, 0 } } } },
+-  { "sub", 0x28, None, 2,
++  { "sub", 0x10, None, 2,
+     { 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0,
+       0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0 },
+@@ -1551,7 +1551,7 @@ const insn_template i386_optab[] =
+ 	  0, 0, 0, 0, 0, 0, 0 } },
+       { { 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1,
+ 	  0, 0, 0, 0, 0, 1, 0 } } } },
+-  { "sub", 0x2c, None, 2,
++  { "sub", 0x14, None, 2,
+     { 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+@@ -1847,7 +1847,7 @@ const insn_template i386_optab[] =
+ 	  0, 0, 0, 0, 0, 0, 0 } },
+       { { 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1,
+ 	  0, 0, 0, 0, 0, 1, 0 } } } },
+-  { "or", 0x08, None, 2,
++  { "or", 0x28, None, 2,
+     { 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0,
+       0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0 },
+@@ -1877,7 +1877,7 @@ const insn_template i386_optab[] =
+ 	  0, 0, 0, 0, 0, 0, 0 } },
+       { { 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1,
+ 	  0, 0, 0, 0, 0, 1, 0 } } } },
+-  { "or", 0x0c, None, 2,
++  { "or", 0x2c, None, 2,
+     { 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+@@ -1980,7 +1980,7 @@ const insn_template i386_optab[] =
+         0, 0, 0, 0, 0, 0, 0 } },
+     { { { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1,
+ 	  0, 0, 0, 0, 0, 0, 0 } } } },
+-  { "adc", 0x10, None, 2,
++  { "adc", 0x08, None, 2,
+     { 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0,
+       0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+@@ -2010,7 +2010,7 @@ const insn_template i386_optab[] =
+ 	  0, 0, 0, 0, 0, 0, 0 } },
+       { { 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1,
+ 	  0, 0, 0, 0, 0, 1, 0 } } } },
+-  { "adc", 0x14, None, 2,
++  { "adc", 0x0c, None, 2,
+     { 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+@@ -3209,7 +3209,7 @@ const insn_template i386_optab[] =
+         0, 0, 0, 0, 1, 0, 0 } },
+     { { { 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0,
+ 	  0, 0, 0, 0, 0, 1, 0 } } } },
+-  { "jmp", 0xeb, None, 1,
++  { "jmp", 0xcb, None, 1,
+     { 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0,
+       0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+@@ -3222,7 +3222,7 @@ const insn_template i386_optab[] =
+         0, 0, 0, 0, 0, 0, 0 } },
+     { { { 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+ 	  0, 0, 0, 0, 0, 0, 0 } } } },
+-  { "jmp", 0xeb, None, 1,
++  { "jmp", 0xcb, None, 1,
+     { 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0,
+       0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2 },
+@@ -8795,7 +8795,7 @@ const insn_template i386_optab[] =
+         0, 0, 0, 0, 0, 0, 0 } },
+     { { { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+ 	  0, 0, 0, 0, 0, 0, 0 } } } },
+-  { "wrmsr", 0x30, None, 0,
++  { "wrmsr", 0x34, None, 0,
+     { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+@@ -8808,7 +8808,7 @@ const insn_template i386_optab[] =
+         0, 0, 0, 0, 0, 0, 0 } },
+     { { { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+ 	  0, 0, 0, 0, 0, 0, 0 } } } },
+-  { "rdtsc", 0x31, None, 0,
++  { "rdtsc", 0x35, None, 0,
+     { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+@@ -8821,7 +8821,7 @@ const insn_template i386_optab[] =
+         0, 0, 0, 0, 0, 0, 0 } },
+     { { { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+ 	  0, 0, 0, 0, 0, 0, 0 } } } },
+-  { "rdmsr", 0x32, None, 0,
++  { "rdmsr", 0x36, None, 0,
+     { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
